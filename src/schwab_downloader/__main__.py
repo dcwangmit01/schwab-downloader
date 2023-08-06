@@ -4,6 +4,6 @@
 import sys
 
 if __name__ == "__main__":
-    from amazon_invoice_downloader.cli import amazon_invoice_downloader
+    from schwab_downloader.cli import schwab_downloader
 
-    sys.exit(amazon_invoice_downloader())
+    sys.exit(schwab_downloader())

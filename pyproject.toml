@@ -3,13 +3,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "amazon-invoice-downloader"
+name = "schwab-downloader"
 dynamic = ["version"]
-description = 'Logs into an Amazon.com account and downloads invoices as PDF'
+description = 'Logs into a schwab.com account and downloads data (statements, checks, etc) as PDF'
 readme = "README.md"
 requires-python = ">=3.7"
 license = "MIT"
-keywords = ["amazon", "invoice", "statements", "download", "pdf"]
+keywords = ["schwab", "data", "statements", "checks", "download", "pdf"]
 authors = [
   { name = "David C Wang", email = "dcwangmit01@gmail.com" },
 ]
@@ -30,15 +30,15 @@ dependencies = [
 ]
 
 [project.urls]
-Documentation = "https://github.com/dcwangmit01/amazon-invoice-downloader#readme"
-Issues = "https://github.com/dcwangmit01/amazon-invoice-downloader/issues"
-Source = "https://github.com/dcwangmit01/amazon-invoice-downloader"
+Documentation = "https://github.com/dcwangmit01/schwab-downloader#readme"
+Issues = "https://github.com/dcwangmit01/schwab-downloader/issues"
+Source = "https://github.com/dcwangmit01/schwab-downloader"
 
 [project.scripts]
-amazon-invoice-downloader = "amazon_invoice_downloader.cli:amazon_invoice_downloader"
+schwab-downloader = "schwab_downloader.cli:schwab_downloader"
 
 [tool.hatch.version]
-path = "src/amazon_invoice_downloader/__about__.py"
+path = "src/schwab_downloader/__about__.py"
 
 [tool.hatch.envs.default]
 dependencies = [
@@ -68,7 +68,7 @@ dependencies = [
   "ruff>=0.0.243",
 ]
 [tool.hatch.envs.lint.scripts]
-typing = "mypy --install-types --non-interactive {args:src/amazon_invoice_downloader tests}"
+typing = "mypy --install-types --non-interactive {args:src/schwab_downloader tests}"
 style = [
   "ruff {args:.}",
   "black --check --diff {args:.}",
@@ -134,7 +134,7 @@ unfixable = [
 ]
 
 [tool.ruff.isort]
-known-first-party = ["amazon_invoice_downloader"]
+known-first-party = ["schwab_downloader"]
 
 [tool.ruff.flake8-tidy-imports]
 ban-relative-imports = "all"
@@ -144,16 +144,16 @@ ban-relative-imports = "all"
 "tests/**/*" = ["PLR2004", "S101", "TID252"]
 
 [tool.coverage.run]
-source_pkgs = ["amazon_invoice_downloader", "tests"]
+source_pkgs = ["schwab_downloader", "tests"]
 branch = true
 parallel = true
 omit = [
-  "src/amazon_invoice_downloader/__about__.py",
+  "src/schwab_downloader/__about__.py",
 ]
 
 [tool.coverage.paths]
-amazon_invoice_downloader = ["src/amazon_invoice_downloader", "*/amazon-invoice-downloader/src/amazon_invoice_downloader"]
-tests = ["tests", "*/amazon-invoice-downloader/tests"]
+schwab_downloader = ["src/schwab_downloader", "*/schwab-downloader/src/schwab_downloader"]
+tests = ["tests", "*/schwab-downloader/tests"]
 
 [tool.coverage.report]
 exclude_lines = [

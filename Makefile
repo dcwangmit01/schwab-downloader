@@ -40,15 +40,16 @@ pyenv: deps  ## Create the pyenv for Python development
 	python -m pip install --upgrade pip
 
 run:  ## Run a few examples
-	hatch run amazon-invoice-downloader --year 2022
-	hatch run amazon-invoice-downloader --date-range 20230131-20221201
-	hatch run amazon-invoice-downloader --email=user@domain.com --password=mypassword
+	hatch run schwab-downloader --year 2022
+	hatch run schwab-downloader --date-range 20230131-20221201
+	hatch run schwab-downloader --email=user@domain.com --password=mypassword
 
 build:  ## Build the project
 	hatch build
 
 clean:  ## Clean the project
 	hatch clean
+	find * -type d -name __pycache__ | xargs rm -rf
 
 mrclean: clean  ## Really clean the project and all downloads
 	rm -rf downloads/

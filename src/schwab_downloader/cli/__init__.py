@@ -3,17 +3,17 @@
 # SPDX-License-Identifier: MIT
 
 """
-Amazon Invoice Downloader
+Schwab Downloader
 
 Usage:
-  amazon-invoice-downloader.py \
+  schwab-downloader.py \
     [--email=<email> --password=<password>] \
     [--year=<YYYY> | --date-range=<YYYYMMDD-YYYYMMDD>]
-  amazon-invoice-downloader.py (-h | --help)
+  schwab-downloader.py (-h | --help)
 
 Login Options:
-  --email=<email>          Amazon login email  [default: $AMAZON_EMAIL].
-  --password=<password>    Amazon login password  [default: $AMAZON_PASSWORD].
+  --email=<email>          Schwab login email  [default: $SCHWAB_EMAIL].
+  --password=<password>    Schwab login password  [default: $SCHWAB_PASSWORD].
 
 Date Range Options:
   --date-range=<YYYYMMDD-YYYYMMDD>  Start and end date range
@@ -23,14 +23,14 @@ Options:
   -h --help                Show this screen.
 
 Examples:
-  amazon-invoice-downloader.py --year=2022  # This uses env vars $AMAZON_EMAIL and $AMAZON_PASSWORD
-  amazon-invoice-downloader.py --date-range=20220101-20221231
-  amazon-invoice-downloader.py --email=user@example.com --password=secret  # Defaults to current year
-  amazon-invoice-downloader.py --email=user@example.com --password=secret --year=2022
-  amazon-invoice-downloader.py --email=user@example.com --password=secret --date-range=20220101-20221231
+  schwab-downloader.py --year=2022  # This uses env vars $SCHWAB_EMAIL and $SCHWAB_PASSWORD
+  schwab-downloader.py --date-range=20220101-20221231
+  schwab-downloader.py --email=user@example.com --password=secret  # Defaults to current year
+  schwab-downloader.py --email=user@example.com --password=secret --year=2022
+  schwab-downloader.py --email=user@example.com --password=secret --date-range=20220101-20221231
 """
 
-from amazon_invoice_downloader.__about__ import __version__
+from schwab_downloader.__about__ import __version__
 
 from playwright.sync_api import sync_playwright, TimeoutError
 from datetime import datetime
@@ -51,15 +51,15 @@ def sleep():
 
 def run(playwright, args):
     email = args.get('--email')
-    if email == '$AMAZON_EMAIL':
-        email = os.environ.get('AMAZON_EMAIL')
+    if email == '$SCHWAB_EMAIL':
+        email = os.environ.get('SCHWAB_EMAIL')
     if not email:
         print("Email must be specified")
         sys.exit(1)
 
     password = args.get('--password')
-    if password == '$AMAZON_PASSWORD':
-        password = os.environ.get('AMAZON_PASSWORD')
+    if password == '$SCHWAB_PASSWORD':
+        password = os.environ.get('SCHWAB_PASSWORD')
     if not password:
         print("Password must be specified")
         sys.exit(1)
@@ -88,7 +88,7 @@ def run(playwright, args):
 
     page = context.new_page()
     # page.set_default_timeout(10000)
-    page.goto("https://www.amazon.com/")
+    page.goto("https://www.schwab.com/")
     page.get_by_role("link", name="Sign in", exact=True).click()
 
     page.get_by_label("Email").click()
@@ -146,7 +146,7 @@ def run(playwright, args):
                 total = spans[3].inner_text().replace("$", "").replace(",", "")  # remove dollar sign and commas
                 orderid = spans[9].inner_text()
                 date_str = date.strftime("%Y%m%d")
-                file_name = f"{target_dir}/{date_str}_{total}_amazon_{orderid}.pdf"
+                file_name = f"{target_dir}/{date_str}_{total}_schwab_{orderid}.pdf"
 
                 if date > end_date:
                     continue
@@ -159,24 +159,24 @@ def run(playwright, args):
                 else:
                     print(f"Saving file [{file_name}]")
                     # Save
-                    link = "https://www.amazon.com/" + order_card.query_selector(
-                        'xpath=//a[contains(text(), "View invoice")]'
+                    link = "https://www.schwab.com/" + order_card.query_selector(
+                        'xpath=//a[contains(text(), "View data")]'
                     ).get_attribute("href")
-                    invoice_page = context.new_page()
-                    invoice_page.goto(link)
-                    invoice_page.pdf(
+                    page = context.new_page()
+                    page.goto(link)
+                    page.pdf(
                         path=file_name,
                         format="Letter",
                         margin={"top": ".5in", "right": ".5in", "bottom": ".5in", "left": ".5in"},
                     )
-                    invoice_page.close()
+                    page.close()
 
     # Close the browser
     context.close()
     browser.close()
 
 
-def amazon_invoice_downloader():
+def schwab_downloader():
     args = docopt(__doc__)
 
     with sync_playwright() as playwright:
