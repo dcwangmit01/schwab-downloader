@@ -7,27 +7,27 @@ Schwab Downloader
 
 Usage:
   schwab-downloader.py \
-    [--email=<email> --password=<password>] \
+    [--all | --checks --docs --transactions] \
     [--year=<YYYY> | --date-range=<YYYYMMDD-YYYYMMDD>]
+    [--id=<id> --password=<password>]
   schwab-downloader.py (-h | --help)
+  schwab-downloader.py (-v | --version)
 
 Login Options:
-  --email=<email>          Schwab login email  [default: $SCHWAB_EMAIL].
-  --password=<password>    Schwab login password  [default: $SCHWAB_PASSWORD].
+  --id=<id>              Schwab login id  [default: $SCHWAB_ID].
+  --password=<password>  Schwab login password  [default: $SCHWAB_PASSWORD].
 
 Date Range Options:
   --date-range=<YYYYMMDD-YYYYMMDD>  Start and end date range
-  --year=<YYYY>            Year, formatted as YYYY  [default: <CUR_YEAR>].
+  --year=<YYYY>                     Year, formatted as YYYY  [default: <CUR_YEAR>].
 
 Options:
   -h --help                Show this screen.
+  -v --version             Show version.
 
 Examples:
-  schwab-downloader.py --year=2022  # This uses env vars $SCHWAB_EMAIL and $SCHWAB_PASSWORD
+  schwab-downloader.py --year=2022
   schwab-downloader.py --date-range=20220101-20221231
-  schwab-downloader.py --email=user@example.com --password=secret  # Defaults to current year
-  schwab-downloader.py --email=user@example.com --password=secret --year=2022
-  schwab-downloader.py --email=user@example.com --password=secret --date-range=20220101-20221231
 """
 
 from schwab_downloader.__about__ import __version__
@@ -39,6 +39,12 @@ import time
 import os
 import sys
 from docopt import docopt
+import json
+import ipdb
+
+
+TARGET_DIR = os.getcwd() + "/" + "downloads"
+DEFAULT_PRINT_FILENAME = "mozilla.pdf"
 
 
 def sleep():
@@ -49,20 +55,127 @@ def sleep():
     time.sleep(sleep_time)
 
 
+def process_brokerage_row(data_row, tds, account) -> (str, str, datetime):
+    assert account['type'] == "brokerage"
+
+    tds_strs = [td.inner_text().strip() for td in tds]
+    tds_strs = ["" if td == "blank" else td for td in tds_strs]  # replace all 'blank' in tds_strs with ""
+
+    date = datetime.strptime(tds_strs[0].split(" ")[0], "%m/%d/%Y")  # strip of "as of mm/dd/yyyy"
+    _type = tds_strs[2].title().replace(" ", "")
+    details_link = data_row.query_selector("a")
+    description = tds_strs[4].title().replace(" ", "")
+    total = tds_strs[8].replace("$", "").replace(",", "").replace("-", "")  # Remove dollar, commas, negative
+
+    date_str = date.strftime("%Y%m%d")
+    account_type = account["type"]
+    account_nickname = account["nickname"].title().replace(" ", "").replace("/", "")
+    account_number = account["number"][-4:]
+
+    file_name = (
+        f"{TARGET_DIR}/{date_str}_{total}_schwab_{account_type}_{account_number}_{account_nickname}"
+        f"_{_type}_{description}.pdf"
+    )
+
+    return file_name, details_link, date
+
+
+def process_bank_row(data_row, tds, account) -> (str, str, datetime):
+    assert account['type'] == "bank"
+
+    tds_strs = [td.inner_text().strip() for td in tds]
+    tds_strs = ["" if td == "blank" else td for td in tds_strs]  # replace all 'blank' in tds_strs with ""
+
+    date = datetime.strptime(tds_strs[0], "%m/%d/%Y")
+    _type = tds_strs[1].title().replace(" ", "")
+    check_number = tds_strs[2]
+    description = tds_strs[3].title().replace(" ", "")
+
+    withdrawal = tds_strs[4].replace("$", "").replace(",", "").replace("-", "")
+    deposit = tds_strs[5].replace("$", "").replace(",", "").replace("-", "")
+
+    total = "0.00"
+    if withdrawal == "":
+        total = deposit
+    elif deposit == "":
+        total = withdrawal
+
+    date_str = date.strftime("%Y%m%d")
+    account_type = account["type"]
+    account_nickname = account["nickname"].title().replace(" ", "").replace("/", "")
+    account_number = account["number"][-4:]  # last 4 digits
+    details_link = data_row.query_selector("a")
+
+    if _type == "Check":
+        file_name = (
+            f"{TARGET_DIR}/{date_str}_{total}_schwab_{account_type}_{account_number}_{account_nickname}"
+            f"_{_type}_{check_number}.pdf"
+        )
+    else:
+        file_name = (
+            f"{TARGET_DIR}/{date_str}_{total}_schwab_{account_type}_{account_number}_{account_nickname}"
+            f"_{_type}_{description}.pdf"
+        )
+    return file_name, details_link, date
+
+
+def process_eac_row(data_row, tds, account) -> (str, str, datetime):
+    assert account['type'] == "EAC"
+
+    # date = datetime.strptime(
+    #     tds[0].inner_text().strip().split(" ")[0], "%m/%d/%Y"
+    # )  # split off the second part "08/16/2023 as of 08/15/2023"
+    return None, None, None
+
+
+def click_modal_and_save(page, file_name, details_link):
+    if os.path.isfile(file_name):
+        print(f"File Exists [{file_name}]")
+    else:
+        print(f"File Saving [{file_name}]")
+
+        details_link.click()
+        time.sleep(5)
+
+        # remove the file mozilla.pdf if it exists
+        if os.path.isfile(DEFAULT_PRINT_FILENAME):
+            os.remove(DEFAULT_PRINT_FILENAME)
+
+        print_link = page.query_selector("a#customModalPrint")  # Wire Details
+        if not print_link:
+            print_link = page.query_selector("a.linkPrint")  # Check Details
+        if not print_link:
+            ipdb.set_trace()
+
+        try:
+            print_link.click()
+            sleep()
+        except Exception as e:
+            print("Print link click failed", e)
+            ipdb.set_trace()
+
+        # Ensure the printed file exists.
+        if not os.path.isfile(DEFAULT_PRINT_FILENAME):
+            print("File [mozilla.pdf] does not exist")
+            ipdb.set_trace()
+        else:
+            # move the file to file_name
+            os.rename(DEFAULT_PRINT_FILENAME, file_name)
+            print(f"File [{file_name}] saved")
+
+        page.query_selector("button#modalClose").click()
+
+
 def run(playwright, args):
-    email = args.get('--email')
-    if email == '$SCHWAB_EMAIL':
-        email = os.environ.get('SCHWAB_EMAIL')
-    if not email:
-        print("Email must be specified")
-        sys.exit(1)
+    print(args)
+
+    id = args.get('--id')
+    if id == '$SCHWAB_ID':
+        id = os.environ.get('SCHWAB_ID')
 
     password = args.get('--password')
     if password == '$SCHWAB_PASSWORD':
         password = os.environ.get('SCHWAB_PASSWORD')
-    if not password:
-        print("Password must be specified")
-        sys.exit(1)
 
     # Parse date ranges int start_date and end_date
     if args['--date-range']:
@@ -76,50 +189,87 @@ def run(playwright, args):
     end_date = datetime.strptime(end_date, "%Y%m%d")
 
     # Debug
-    # print(email, password, start_date, end_date)
+    print(start_date, end_date)
 
     # Ensure the location exists for where we will save our downloads
-    target_dir = os.getcwd() + "/" + "downloads"
-    os.makedirs(target_dir, exist_ok=True)
+    os.makedirs(TARGET_DIR, exist_ok=True)
 
-    # Create Playwright context with Chromium
-    browser = playwright.chromium.launch(headless=False)
+    # Create Playwright context with Firefox
+    browser = playwright.firefox.launch(
+        headless=False,
+        firefox_user_prefs={
+            "print.always_print_silent": True,
+            "print.printer_Mozilla_Save_to_PDF.print_to_file": True,
+            "print_printer": "Mozilla Save to PDF",
+        },
+    )
     context = browser.new_context()
 
     page = context.new_page()
-    # page.set_default_timeout(10000)
     page.goto("https://www.schwab.com/")
-    page.get_by_role("link", name="Sign in", exact=True).click()
-
-    page.get_by_label("Email").click()
-    page.get_by_label("Email").fill(email)
-    page.get_by_role("button", name="Continue").click()
-
-    page.get_by_label("Password").click()
-    page.get_by_label("Password").fill(password)
-    page.get_by_label("Keep me signed in").check()
-    page.get_by_role("button", name="Sign in").click()
-
-    page.get_by_role("link", name="Returns & Orders").click()
+    sleep()
+    page.get_by_role("link", name="Log In").click()
+    sleep()
+    page.get_by_role("link", name="Schwab.com").click()
     sleep()
 
-    # Get a list of years from the select options
-    select = page.query_selector('select[name="orderFilter"]')
-    years = select.inner_text().split("\n")  # skip the first two text options
-
-    # Filter years to include only numerical years (YYYY)
-    years = [year for year in years if year.isnumeric()]
-
-    # Filter years to the include only the years between start_date and end_date inclusively
-    years = [year for year in years if start_date.year <= int(year) <= end_date.year]
-    years.sort(reverse=True)
-
-    # Year Loop (Run backwards through the time range from years to pages to orders)
-    for year in years:
-        # Select the year in the order filter
-        page.locator("#a-autoid-1-announce").click()  # Time Range Dropdown Filter
-        page.get_by_role("option", name=year).click()  # Select the year (descending order, most recent first)
+    if id:
+        page.frame_locator("#lmsSecondaryLogin").get_by_placeholder("Login ID").click()
+        page.frame_locator("#lmsSecondaryLogin").get_by_placeholder("Login ID").fill(id)
         sleep()
+
+    if password:
+        page.frame_locator("#lmsSecondaryLogin").get_by_placeholder("Password").click()
+        page.frame_locator("#lmsSecondaryLogin").get_by_placeholder("Password").fill(password)
+        sleep()
+
+    page.frame_locator("#lmsSecondaryLogin").get_by_label("Remember Login ID").check()
+    sleep()
+
+    if id and password:
+        page.frame_locator("#lmsSecondaryLogin").get_by_role("button", name="Log In").click()
+        sleep()
+
+    # Wait until user to clicks through the login and 2fa pages and successfully login
+    page.wait_for_url('*client.schwab.com/clientapps/*', timeout=0)
+
+    # Click on history
+    page.get_by_label("secondary level").get_by_role("link", name="History").click()
+    page.get_by_role("tab", name="Transactions").click()
+    sleep()
+
+    # parse all accounts and their links
+    accounts = {}
+    for i, account_type in enumerate(["brokerage", "other", "bank"]):
+        accounts_list = page.query_selector(f"xpath=//ul[@aria-labelledby='header-{i}']")
+        for a in accounts_list.query_selector_all("a"):
+            account_nickname, account_number = [span.inner_text() for span in a.query_selector_all("span")]
+
+            # for EAC accounts
+            if account_number == "":
+                account_number = "EAC"
+
+            accounts[account_number] = {
+                "number": account_number,
+                "nickname": account_nickname,
+                "type": account_type,
+            }
+
+    print(json.dumps(accounts, indent=2))
+
+    for _, account in accounts.items():
+        # TODO: Only do brokerage
+        if account['type'] in ["other", "brokerage"]:
+            continue
+
+        print("processing account", json.dumps(account, indent=2))
+
+        # Click to select the account if it's not already selected
+        if account['number'] not in page.query_selector("button.account-selector-button").inner_text():
+            # Click on the account selector box
+            page.click('.sdps-account-selector')
+            page.query_selector(f"xpath=//span[contains(text(), '{account['number']}')]").click()
+            sleep()
 
         # Page Loop
         first_page = True
@@ -127,49 +277,38 @@ def run(playwright, args):
         while not done:
             # Go to the next page pagination, and continue downloading
             #   if there is not a next page then break
-            try:
-                if first_page:
-                    first_page = False
-                else:
-                    page.get_by_role("link", name="Next →").click()
-                sleep()  # sleep after every page load
-            except TimeoutError:
-                # There are no more pages
-                break
-
-            # Order Loop
-            order_cards = page.query_selector_all(".js-order-card")
-            for order_card in order_cards:
-                # Parse the order card to create the date and file_name
-                spans = order_card.query_selector_all("span")
-                date = datetime.strptime(spans[1].inner_text(), "%B %d, %Y")
-                total = spans[3].inner_text().replace("$", "").replace(",", "")  # remove dollar sign and commas
-                orderid = spans[9].inner_text()
-                date_str = date.strftime("%Y%m%d")
-                file_name = f"{target_dir}/{date_str}_{total}_schwab_{orderid}.pdf"
-
-                if date > end_date:
-                    continue
-                elif date < start_date:
-                    done = True
+            if first_page:
+                first_page = False
+            else:
+                next_link = page.query_selector("xpath=//a[contains(text(), 'Next')]")
+                if not next_link:
                     break
+                next_link.click()
+                sleep()
 
-                if os.path.isfile(file_name):
-                    print(f"File [{file_name}] already exists")
+            # Row Loop
+            data_rows = page.query_selector_all("tr.data-row")
+            for data_row in data_rows:
+                # Get all immediate <td> children of the parent tr element.
+                tds = data_row.query_selector_all(":scope > td")
+
+                file_name, details_link, date = None, None, None
+                if account['type'] == "brokerage":
+                    file_name, details_link, date = process_brokerage_row(data_row, tds, account)
+                elif account['type'] == "bank":
+                    file_name, details_link, date = process_bank_row(data_row, tds, account)
                 else:
-                    print(f"Saving file [{file_name}]")
-                    # Save
-                    link = "https://www.schwab.com/" + order_card.query_selector(
-                        'xpath=//a[contains(text(), "View data")]'
-                    ).get_attribute("href")
-                    page = context.new_page()
-                    page.goto(link)
-                    page.pdf(
-                        path=file_name,
-                        format="Letter",
-                        margin={"top": ".5in", "right": ".5in", "bottom": ".5in", "left": ".5in"},
-                    )
-                    page.close()
+                    file_name, details_link, date = process_eac_row(data_row, tds, account)
+
+                # if date > end_date:
+                #     continue
+                # elif date < start_date:
+                #     done = True
+                #     break
+                if not details_link:
+                    continue
+                click_modal_and_save(page, file_name, details_link)
+            pass
 
     # Close the browser
     context.close()
@@ -178,6 +317,10 @@ def run(playwright, args):
 
 def schwab_downloader():
     args = docopt(__doc__)
+    print(args)
+    if args['--version']:
+        print(__version__)
+        sys.exit(0)
 
     with sync_playwright() as playwright:
         run(playwright, args)

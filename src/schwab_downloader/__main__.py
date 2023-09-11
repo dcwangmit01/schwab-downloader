@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 import sys
 
-if __name__ == "__main__":
-    from schwab_downloader.cli import schwab_downloader
+from schwab_downloader.cli import schwab_downloader
 
+if __name__ == "__main__":
     sys.exit(schwab_downloader())

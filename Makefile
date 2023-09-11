@@ -39,6 +39,12 @@ pyenv: deps  ## Create the pyenv for Python development
 	done
 	python -m pip install --upgrade pip
 
+install-local:
+	pip install --editable .
+
+run-local:
+	schwab-downloader --year 2022
+
 run:  ## Run a few examples
 	hatch run schwab-downloader --year 2022
 	hatch run schwab-downloader --date-range 20230131-20221201
@@ -53,6 +59,7 @@ clean:  ## Clean the project
 
 mrclean: clean  ## Really clean the project and all downloads
 	rm -rf downloads/
+	pyenv virtualenv-delete -f $(PYPYENV_NAME)
 
 help:  ## Print list of Makefile targets
 	@# Taken from https://github.com/spf13/hugo/blob/master/Makefile
