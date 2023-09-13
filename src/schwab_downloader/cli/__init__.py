@@ -41,6 +41,7 @@ import sys
 from docopt import docopt
 import json
 import ipdb
+from playwright_stealth import stealth_sync
 
 
 TARGET_DIR = os.getcwd() + "/" + "downloads"
@@ -57,6 +58,7 @@ class SchwabDownloader:
         self.browser = None
         self.context = None
         self.page = None
+        self.accounts = None
         self.DEFAULT_PRINT_FILENAME = "mozilla.pdf"
 
     def parse_credentials(self):
@@ -84,64 +86,51 @@ class SchwabDownloader:
         os.makedirs(TARGET_DIR, exist_ok=True)
 
     def launch_browser(self):
-        self.browser = self.playwright.firefox.launch(
+        self.browser = self.playwright.chromium.launch(
             headless=False,
-            firefox_user_prefs={
-                "print.always_print_silent": True,
-                "print.printer_Mozilla_Save_to_PDF.print_to_file": True,
-                "print_printer": "Mozilla Save to PDF",
-            },
         )
+
         self.context = self.browser.new_context()
 
     def login(self):
         self.page = self.context.new_page()
+        stealth_sync(self.page)
         self.page.goto("https://www.schwab.com/")
-        self.sleep()
-        self.page.get_by_role("link", name="Log In").click()
-        self.sleep()
-        self.page.get_by_role("link", name="Schwab.com").click()
-        self.sleep()
 
         if self.id:
-            self.page.frame_locator("#lmsSecondaryLogin").get_by_placeholder("Login ID").click()
-            self.page.frame_locator("#lmsSecondaryLogin").get_by_placeholder("Login ID").fill(self.id)
+            self.page.frame_locator("iframe[title=\"log in form\"]").get_by_label("Login ID", exact=True).click()
+            self.page.frame_locator("iframe[title=\"log in form\"]").get_by_label("Login ID", exact=True).fill(self.id)
             self.sleep()
 
         if self.password:
-            self.page.frame_locator("#lmsSecondaryLogin").get_by_placeholder("Password").click()
-            self.page.frame_locator("#lmsSecondaryLogin").get_by_placeholder("Password").fill(self.password)
+            self.page.frame_locator("iframe[title=\"log in form\"]").get_by_placeholder("Password").click()
+            self.page.frame_locator("iframe[title=\"log in form\"]").get_by_placeholder("Password").fill(self.password)
             self.sleep()
 
-        self.page.frame_locator("#lmsSecondaryLogin").get_by_label("Remember Login ID").check()
-        self.sleep()
+        self.page.frame_locator("iframe[title=\"log in form\"]").get_by_label("Remember Login ID").check()
 
         if self.id and self.password:
-            self.page.frame_locator("#lmsSecondaryLogin").get_by_role("button", name="Log In").click()
+            self.page.frame_locator("iframe[title=\"log in form\"]").get_by_label("Log in").click()
             self.sleep()
 
     def navigate_to_history(self):
-        self.page.wait_for_url('*client.schwab.com/clientapps/*', timeout=0)
+        self.page.wait_for_url('*client.schwab.com/*', timeout=0)
+        self.sleep()
         self.page.get_by_label("secondary level").get_by_role("link", name="History").click()
         self.page.get_by_role("tab", name="Transactions").click()
         self.sleep()
 
-    def process_accounts(self):
-        accounts = self.get_all_accounts()
-        print(json.dumps(accounts, indent=2))
+    def navigate_to_statements(self):
+        self.page.wait_for_url('*client.schwab.com/*', timeout=0)
+        self.page.get_by_label("secondary level").get_by_role("link", name="Statements").click()
+        self.sleep()
 
-        for _, account in accounts.items():
-            if account['type'] in ["other", "brokerage"]:
-                continue
-            print("Processing account", json.dumps(account, indent=2))
+    def load_accounts(self):
+        self.navigate_to_history()
 
-            self.select_account(account)
-            self.process_account_data(account)
-
-    def get_all_accounts(self):
         accounts = {}
         for i, account_type in enumerate(["brokerage", "other", "bank"]):
-            accounts_list = self.page.query_selector(f"xpath=//ul[@aria-labelledby='header-{i}']")
+            accounts_list = self.page.query_selector(f"xpath=//ul[contains(@aria-labelledby, 'header-{i}')]")
             for a in accounts_list.query_selector_all("a"):
                 account_nickname, account_number = [span.inner_text() for span in a.query_selector_all("span")]
                 if account_number == "":
@@ -151,7 +140,18 @@ class SchwabDownloader:
                     "nickname": account_nickname,
                     "type": account_type,
                 }
-        return accounts
+        self.accounts = accounts
+        print(json.dumps(self.accounts, indent=2))
+
+    def process_accounts(self, fn_account_selector: callable, fn_process_row: callable, fn_click_save: callable):
+        for _, account in self.accounts.items():
+            # TODO: Remove this
+            if account['type'] in ["other", "brokerage"]:
+                continue
+            print("Processing account", json.dumps(account, indent=2))
+
+            fn_account_selector(account)
+            self.process_page(account, fn_process_row, fn_click_save)
 
     def select_account(self, account):
         if account['number'] not in self.page.query_selector("button.account-selector-button").inner_text():
@@ -159,7 +159,18 @@ class SchwabDownloader:
             self.page.query_selector(f"xpath=//span[contains(text(), '{account['number']}')]").click()
             self.sleep()
 
-    def process_data_row(self, data_row, tds, account) -> (str, str, datetime):
+    def select_statements_account(self, account):
+        self.select_account(account)
+        self.page.query_selector("#date-range-select-id").click()
+        self.page.select_option('#date-range-select-id', 'Last 10 Years')
+        select_all_button = self.page.query_selector('xpath=//button[contains(., "Select All")]')
+        if select_all_button:
+            select_all_button.click()
+        search_button = self.page.query_selector('xpath=//button[contains(., "Search")]')
+        search_button.click()
+        self.sleep()
+
+    def process_account_row(self, data_row, tds, account) -> (str, str, datetime):
         tds_strs = [td.inner_text().strip() for td in tds]
         tds_strs = ["" if td == "blank" else td for td in tds_strs]
 
@@ -207,7 +218,32 @@ class SchwabDownloader:
 
         return file_name, details_link, date
 
-    def process_account_data(self, account):
+    def process_statements_row(self, data_row, tds, account) -> (str, str, datetime):
+        tds_strs = [td.inner_text().strip() for td in tds]
+        tds_strs = ["" if td == "blank" else td for td in tds_strs]
+        print(tds_strs)
+
+        account_type = account["type"]
+        account_nickname = account["nickname"].title().replace(" ", "").replace("/", "")
+        account_number = account["number"][-4:]
+
+        date = datetime.strptime(tds_strs[0].split(" ")[0], "%m/%d/%Y")
+        _type = tds_strs[1].title().replace(" ", "")
+        doc_name = tds_strs[3].title().replace(" ", "").split("\n")[0]  # Split off regulatory inserts
+
+        date_str = date.strftime("%Y%m%d")
+
+        file_name = (
+            f"{TARGET_DIR}/{date_str}_schwab"
+            f"_{account_type}_{account_number}_{account_nickname}"
+            f"_{_type}_{doc_name}.pdf"
+        )
+
+        details_link = data_row.query_selector_all("button")[-1]
+
+        return file_name, details_link, date
+
+    def process_page(self, account, fn_process_row: callable, fn_click_save: callable):
         first_page = True
         done = False
         while not done:
@@ -220,10 +256,10 @@ class SchwabDownloader:
                 next_link.click()
                 self.sleep()
 
-            data_rows = self.page.query_selector_all("tr.data-row")
+            data_rows = self.page.query_selector_all("tbody > tr")
             for data_row in data_rows:
                 tds = data_row.query_selector_all(":scope > td")
-                file_name, details_link, date = self.process_data_row(data_row, tds, account)
+                file_name, details_link, date = fn_process_row(data_row, tds, account)
                 if date > self.end_date:
                     continue
                 elif date < self.start_date:
@@ -231,7 +267,19 @@ class SchwabDownloader:
                     break
                 if not details_link:
                     continue
-                self.click_modal_and_save(file_name, details_link)
+                fn_click_save(file_name, details_link)
+
+    def click_and_save(self, file_name, details_link):
+        if os.path.isfile(file_name):
+            print(f"File Exists [{file_name}]")
+        else:
+            print(f"File Saving [{file_name}]")
+
+            with self.page.expect_download() as download_info:
+                details_link.click()
+            download = download_info.value
+            download.save_as(file_name)
+
 
     def click_modal_and_save(self, file_name, details_link):
         if os.path.isfile(file_name):
@@ -239,12 +287,12 @@ class SchwabDownloader:
         else:
             print(f"File Saving [{file_name}]")
 
-            details_link.click()
-            time.sleep(5)
-
             # remove the file mozilla.pdf if it exists
             if os.path.isfile(self.DEFAULT_PRINT_FILENAME):
                 os.remove(self.DEFAULT_PRINT_FILENAME)
+
+            details_link.click()
+            time.sleep(5)
 
             print_link = self.page.query_selector("a#customModalPrint")  # Wire Details
             if not print_link:
@@ -285,11 +333,14 @@ class SchwabDownloader:
         print(self.args)
         self.parse_credentials()
         self.parse_date_range()
-        self.ensure_target_dir("YOUR_TARGET_DIR")  # Replace with the actual directory
+        self.ensure_target_dir(TARGET_DIR)  # Replace with the actual directory
         self.launch_browser()
         self.login()
-        self.navigate_to_history()
-        self.process_accounts()
+        self.load_accounts()
+        # self.navigate_to_history()
+        # self.process_accounts(self.select_account, self.process_account_row, self.click_modal_and_save)
+        self.navigate_to_statements()
+        self.process_accounts(self.select_statements_account, self.process_statements_row, self.click_and_save)
         self.close()
 
 
