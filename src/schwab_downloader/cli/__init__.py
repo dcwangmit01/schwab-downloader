@@ -134,7 +134,7 @@ class SchwabDownloader:
             for a in accounts_list.query_selector_all("a"):
                 account_nickname, account_number = [span.inner_text() for span in a.query_selector_all("span")]
                 if account_number == "":
-                    account_number = "EAC"
+                    account_number = "Equity Award Center"
                 accounts[account_number] = {
                     "number": account_number,
                     "nickname": account_nickname,
@@ -145,9 +145,6 @@ class SchwabDownloader:
 
     def process_accounts(self, fn_account_selector: callable, fn_process_row: callable, fn_click_save: callable):
         for _, account in self.accounts.items():
-            # TODO: Remove this
-            if account['type'] in ["other", "brokerage"]:
-                continue
             print("Processing account", json.dumps(account, indent=2))
 
             fn_account_selector(account)
@@ -229,7 +226,9 @@ class SchwabDownloader:
 
         date = datetime.strptime(tds_strs[0].split(" ")[0], "%m/%d/%Y")
         _type = tds_strs[1].title().replace(" ", "")
-        doc_name = tds_strs[3].title().replace(" ", "").split("\n")[0]  # Split off regulatory inserts
+        doc_name = (
+            tds_strs[3].title().replace(" ", "").split("\n")[0].replace("/", "")
+        )  # Split off regulatory inserts, then replace slashes
 
         date_str = date.strftime("%Y%m%d")
 
@@ -239,8 +238,7 @@ class SchwabDownloader:
             f"_{_type}_{doc_name}.pdf"
         )
 
-        details_link = data_row.query_selector_all("button")[-1]
-
+        details_link = data_row.query_selector("button:text('PDF')")
         return file_name, details_link, date
 
     def process_page(self, account, fn_process_row: callable, fn_click_save: callable):
@@ -279,7 +277,6 @@ class SchwabDownloader:
                 details_link.click()
             download = download_info.value
             download.save_as(file_name)
-
 
     def click_modal_and_save(self, file_name, details_link):
         if os.path.isfile(file_name):
