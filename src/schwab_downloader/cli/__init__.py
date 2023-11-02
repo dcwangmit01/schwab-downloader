@@ -59,7 +59,6 @@ class SchwabDownloader:
         self.context = None
         self.page = None
         self.accounts = None
-        self.DEFAULT_PRINT_FILENAME = "mozilla.pdf"
 
     def parse_credentials(self):
         self.id = self.args.get('--id')
@@ -200,15 +199,15 @@ class SchwabDownloader:
 
         if _type == "Check":
             file_name = (
-                f"{TARGET_DIR}/{date_str}_{total}_schwab"
-                f"_{account_type}_{account_number}_{account_nickname}"
-                f"_{_type}_{check_number}.pdf"
+                f"{TARGET_DIR}/schwab"
+                f"_{account_type}_{account_number}_{account_nickname}_{date_str}"
+                f"_{total}_{_type}_{check_number}.pdf"
             )
         else:
             file_name = (
-                f"{TARGET_DIR}/{date_str}_{total}_schwab"
-                f"_{account_type}_{account_number}_{account_nickname}"
-                f"_{_type}_{description}.pdf"
+                f"{TARGET_DIR}/schwab"
+                f"_{account_type}_{account_number}_{account_nickname}_{date_str}"
+                f"_{total}_{_type}_{description}.pdf"
             )
 
         details_link = data_row.query_selector("a")
@@ -233,8 +232,8 @@ class SchwabDownloader:
         date_str = date.strftime("%Y%m%d")
 
         file_name = (
-            f"{TARGET_DIR}/{date_str}_schwab"
-            f"_{account_type}_{account_number}_{account_nickname}"
+            f"{TARGET_DIR}/schwab"
+            f"_{account_type}_{account_number}_{account_nickname}_{date_str}"
             f"_{_type}_{doc_name}.pdf"
         )
 
@@ -284,10 +283,6 @@ class SchwabDownloader:
         else:
             print(f"File Saving [{file_name}]")
 
-            # remove the file mozilla.pdf if it exists
-            if os.path.isfile(self.DEFAULT_PRINT_FILENAME):
-                os.remove(self.DEFAULT_PRINT_FILENAME)
-
             details_link.click()
             time.sleep(5)
 
@@ -298,20 +293,16 @@ class SchwabDownloader:
                 ipdb.set_trace()
 
             try:
-                print_link.click()
+                self.page.pdf(
+                    path=file_name,
+                    format="Letter",
+                    margin={"top": ".5in", "right": ".5in", "bottom": ".5in", "left": ".5in"},
+                    page_ranges="1",  # page.pdf is generating 5 pages instead of 1... work around it
+                )
                 self.sleep()
             except Exception as e:
-                print("Print link click failed", e)
+                print("Save Page failed", e)
                 ipdb.set_trace()
-
-            # Ensure the printed file exists.
-            if not os.path.isfile(self.DEFAULT_PRINT_FILENAME):
-                print("File [mozilla.pdf] does not exist")
-                ipdb.set_trace()
-            else:
-                # move the file to file_name
-                os.rename(self.DEFAULT_PRINT_FILENAME, file_name)
-                print(f"File [{file_name}] saved")
 
             self.page.query_selector("button#modalClose").click()
 
@@ -334,10 +325,10 @@ class SchwabDownloader:
         self.launch_browser()
         self.login()
         self.load_accounts()
-        # self.navigate_to_history()
-        # self.process_accounts(self.select_account, self.process_account_row, self.click_modal_and_save)
-        self.navigate_to_statements()
-        self.process_accounts(self.select_statements_account, self.process_statements_row, self.click_and_save)
+        self.navigate_to_history()
+        self.process_accounts(self.select_account, self.process_account_row, self.click_modal_and_save)
+        # self.navigate_to_statements()
+        # self.process_accounts(self.select_statements_account, self.process_statements_row, self.click_and_save)
         self.close()
 
 
