@@ -155,6 +155,14 @@ class SchwabDownloader:
             self.page.query_selector(f"xpath=//span[contains(text(), '{account['number']}')]").click()
             self.sleep()
 
+    def select_history_account(self, account):
+        self.select_account(account)
+        self.page.query_selector("#statements-daterange1").click()
+        self.page.select_option('#statements-daterange1', 'All')
+        search_button = self.page.query_selector('xpath=//button[contains(., "Search")]')
+        search_button.click()
+        self.sleep()
+
     def select_statements_account(self, account):
         self.select_account(account)
         self.page.query_selector("#date-range-select-id").click()
@@ -166,7 +174,7 @@ class SchwabDownloader:
         search_button.click()
         self.sleep()
 
-    def process_account_row(self, data_row, tds, account) -> (str, str, datetime):
+    def process_history_row(self, data_row, tds, account) -> (str, str, datetime):
         tds_strs = [td.inner_text().strip() for td in tds]
         tds_strs = ["" if td == "blank" else td for td in tds_strs]
 
@@ -174,7 +182,10 @@ class SchwabDownloader:
         account_nickname = account["nickname"].title().replace(" ", "").replace("/", "")
         account_number = account["number"][-4:]
 
-        if account_type == "brokerage":
+        if account_type == "other":  # EAC Row
+            # EAC doesn't have details to save.  Set date to be super old and details_link = None
+            return None, None, datetime(2000, 1, 1)
+        elif account_type == "brokerage":
             date = datetime.strptime(tds_strs[0].split(" ")[0], "%m/%d/%Y")
             _type = tds_strs[2].title().replace(" ", "")
             description = tds_strs[4].title().replace(" ", "")
@@ -192,8 +203,6 @@ class SchwabDownloader:
                 total = deposit
             elif deposit == "":
                 total = withdrawal
-        else:  # EAC Row
-            return None, None, None
 
         date_str = date.strftime("%Y%m%d")
 
@@ -221,7 +230,10 @@ class SchwabDownloader:
 
         account_type = account["type"]
         account_nickname = account["nickname"].title().replace(" ", "").replace("/", "")
-        account_number = account["number"][-4:]
+        if account_type == "other":
+            account_number = "EAC"
+        else:
+            account_number = account["number"][-4:]
 
         date = datetime.strptime(tds_strs[0].split(" ")[0], "%m/%d/%Y")
         _type = tds_strs[1].title().replace(" ", "")
@@ -326,9 +338,9 @@ class SchwabDownloader:
         self.login()
         self.load_accounts()
         self.navigate_to_history()
-        self.process_accounts(self.select_account, self.process_account_row, self.click_modal_and_save)
-        # self.navigate_to_statements()
-        # self.process_accounts(self.select_statements_account, self.process_statements_row, self.click_and_save)
+        self.process_accounts(self.select_history_account, self.process_history_row, self.click_modal_and_save)
+        self.navigate_to_statements()
+        self.process_accounts(self.select_statements_account, self.process_statements_row, self.click_and_save)
         self.close()
 
 
