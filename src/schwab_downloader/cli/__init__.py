@@ -30,19 +30,19 @@ Examples:
   schwab-downloader.py --date-range=20220101-20221231
 """
 
-from schwab_downloader.__about__ import __version__
-
-from playwright.sync_api import sync_playwright
-from datetime import datetime
-import random
-import time
-import os
-import sys
-from docopt import docopt
 import json
+import os
+import random
+import sys
+import time
+from datetime import datetime
+
 import ipdb
+from docopt import docopt
+from playwright.sync_api import sync_playwright
 from playwright_stealth import stealth_sync
 
+from schwab_downloader.__about__ import __version__
 
 TARGET_DIR = os.getcwd() + "/" + "downloads"
 
@@ -188,7 +188,7 @@ class SchwabDownloader:
     def process_history_row(self, data_row, tds, account) -> (str, str, datetime):
         tds_strs = [td.inner_text().strip() for td in tds]
         tds_strs = ["" if td == "blank" else td for td in tds_strs]
-        tds_strs = [td.replace("\n", "") for td in tds_strs] # remove all newlines from tds_strs
+        tds_strs = [td.replace("\n", "") for td in tds_strs]  # remove all newlines from tds_strs
 
         account_type = account["type"]
         account_nickname = account["nickname"].title().replace(" ", "").replace("/", "")
@@ -199,7 +199,9 @@ class SchwabDownloader:
             return None, None, datetime(2000, 1, 1)
         elif account_type == "brokerage":
             if len(tds_strs) != 7:
-                import ipdb; ipdb.set_trace()
+                import ipdb
+
+                ipdb.set_trace()
             date = datetime.strptime(tds_strs[0].split(" ")[0], "%m/%d/%Y")
             _type = tds_strs[1].title().replace(" ", "")
             description = tds_strs[2].title().replace(" ", "")
@@ -241,7 +243,6 @@ class SchwabDownloader:
         tds_strs = [td.inner_text().strip() for td in tds]
         tds_strs = ["" if td == "blank" else td for td in tds_strs]
 
-
         # Skip the records of the 1099 dashboard, which is the annual summary
         if len(tds_strs) == 3:
             return None, None, datetime(2000, 1, 1)
@@ -262,9 +263,7 @@ class SchwabDownloader:
         date_str = date.strftime("%Y%m%d")
 
         file_name = (
-            f"{TARGET_DIR}/schwab"
-            f"_{account_type}_{account_number}_{account_nickname}_{date_str}"
-            f"_{_type}_{doc_name}.pdf"
+            f"{TARGET_DIR}/schwab_{account_type}_{account_number}_{account_nickname}_{date_str}_{_type}_{doc_name}.pdf"
         )
 
         details_link = data_row.query_selector("button:text('PDF')")

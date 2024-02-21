@@ -1,14 +1,14 @@
 {
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "name": "schwab-downloader",
-            "type": "python",
-            "request": "launch",
-            "program": "src/schwab_downloader/__main__.py",
-            "console": "integratedTerminal",
-            "justMyCode": "true",
-            "args": [],
-        },
-    ]
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "schwab-downloader",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "src/schwab_downloader/__main__.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": []
+    }
+  ]
 }
