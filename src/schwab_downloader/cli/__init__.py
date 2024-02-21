@@ -131,9 +131,21 @@ class SchwabDownloader:
         for i, account_type in enumerate(["brokerage", "other", "bank"]):
             accounts_list = self.page.query_selector(f"xpath=//ul[contains(@aria-labelledby, 'header-{i}')]")
             for a in accounts_list.query_selector_all("a"):
-                account_nickname, account_number = [span.inner_text() for span in a.query_selector_all("span")]
-                if account_number == "":
+                span_texts = [span.inner_text() for span in a.query_selector_all("span")]
+                account_nickname = span_texts[0]
+
+                if len(span_texts) == 5:
+                    # Then this is an EAC account
                     account_number = "Equity Award Center"
+                elif len(span_texts) == 6:
+                    # Then this is either bank or brokerage
+                    account_number = "".join(
+                        [c for c in span_texts[3] if c.isdigit()]
+                    )  # strip out all non-numeric characters
+                else:
+                    print("Website has changed, must update code")
+                    ipdb.set_trace()
+
                 accounts[account_number] = {
                     "number": account_number,
                     "nickname": account_nickname,
@@ -157,8 +169,7 @@ class SchwabDownloader:
 
     def select_history_account(self, account):
         self.select_account(account)
-        self.page.query_selector("#statements-daterange1").click()
-        self.page.select_option('#statements-daterange1', 'All')
+        self.page.select_option('#date-range-select-id', 'All')
         search_button = self.page.query_selector('xpath=//button[contains(., "Search")]')
         search_button.click()
         self.sleep()
@@ -177,6 +188,7 @@ class SchwabDownloader:
     def process_history_row(self, data_row, tds, account) -> (str, str, datetime):
         tds_strs = [td.inner_text().strip() for td in tds]
         tds_strs = ["" if td == "blank" else td for td in tds_strs]
+        tds_strs = [td.replace("\n", "") for td in tds_strs] # remove all newlines from tds_strs
 
         account_type = account["type"]
         account_nickname = account["nickname"].title().replace(" ", "").replace("/", "")
@@ -186,10 +198,12 @@ class SchwabDownloader:
             # EAC doesn't have details to save.  Set date to be super old and details_link = None
             return None, None, datetime(2000, 1, 1)
         elif account_type == "brokerage":
+            if len(tds_strs) != 7:
+                import ipdb; ipdb.set_trace()
             date = datetime.strptime(tds_strs[0].split(" ")[0], "%m/%d/%Y")
-            _type = tds_strs[2].title().replace(" ", "")
-            description = tds_strs[4].title().replace(" ", "")
-            total = tds_strs[8].replace("$", "").replace(",", "").replace("-", "")
+            _type = tds_strs[1].title().replace(" ", "")
+            description = tds_strs[2].title().replace(" ", "")
+            total = tds_strs[6].replace("$", "").replace(",", "").replace("-", "")
         elif account_type == "bank":
             date = datetime.strptime(tds_strs[0], "%m/%d/%Y")
             _type = tds_strs[1].title().replace(" ", "")
@@ -219,14 +233,18 @@ class SchwabDownloader:
                 f"_{total}_{_type}_{description}.pdf"
             )
 
-        details_link = data_row.query_selector("a")
+        details_link = data_row.query_selector("button")
 
         return file_name, details_link, date
 
     def process_statements_row(self, data_row, tds, account) -> (str, str, datetime):
         tds_strs = [td.inner_text().strip() for td in tds]
         tds_strs = ["" if td == "blank" else td for td in tds_strs]
-        print(tds_strs)
+
+
+        # Skip the records of the 1099 dashboard, which is the annual summary
+        if len(tds_strs) == 3:
+            return None, None, datetime(2000, 1, 1)
 
         account_type = account["type"]
         account_nickname = account["nickname"].title().replace(" ", "").replace("/", "")
@@ -269,13 +287,13 @@ class SchwabDownloader:
             for data_row in data_rows:
                 tds = data_row.query_selector_all(":scope > td")
                 file_name, details_link, date = fn_process_row(data_row, tds, account)
+                if not details_link:
+                    continue
                 if date > self.end_date:
                     continue
                 elif date < self.start_date:
                     done = True
                     break
-                if not details_link:
-                    continue
                 fn_click_save(file_name, details_link)
 
     def click_and_save(self, file_name, details_link):
@@ -298,7 +316,7 @@ class SchwabDownloader:
             details_link.click()
             time.sleep(5)
 
-            print_link = self.page.query_selector("a#customModalPrint")  # Wire Details
+            print_link = self.page.query_selector("a.print-link")  # Wire Details
             if not print_link:
                 print_link = self.page.query_selector("a.linkPrint")  # Check Details
             if not print_link:
@@ -316,7 +334,8 @@ class SchwabDownloader:
                 print("Save Page failed", e)
                 ipdb.set_trace()
 
-            self.page.query_selector("button#modalClose").click()
+            # Close the Modal
+            self.page.keyboard.press('Escape')
 
     def close(self):
         self.context.close()
