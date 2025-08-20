@@ -36,7 +36,6 @@ Examples:
 
 import json
 import os
-import random
 import sys
 import time
 from datetime import datetime
@@ -235,8 +234,6 @@ class SchwabDownloader:
                 "xpath=.//sdps-list-label-value-item[.//span[contains(text(), 'Type')]]//div[@slot='value']"
             )
             account_type_text = type_item.inner_text().strip() if type_item else "Unknown"
-            if 'DAF' in account_type_text:
-                account_type = "DAF"
 
             # Extract "Companies" from the label-value item with "Companies" label, if present
             companies_item = dialog.query_selector(
@@ -244,11 +241,13 @@ class SchwabDownloader:
             )
             companies_text = companies_item.inner_text().strip() if companies_item else None
             if companies_text:
-                account_type = "EAC " + companies_text
+                account_type = "EAC"
                 account_name = "EAC " + companies_text
-                account_number = "EAC"
+                account_number = "EAC" + companies_text
+            elif 'DAF' in account_type_text:
+                account_type = "DAF"
             else:
-                account_type = account_type_text.lower()
+                account_type = account_type_text
 
             # Store the account information
             self.accounts[account_number] = {
@@ -451,9 +450,10 @@ class SchwabDownloader:
     def sleep(self):
         # Add human latency
         # Generate a random self.sleep time between 3 and 5 seconds
-        self.sleep_time = random.uniform(1, 2)
-        # self.sleep for the generated time
-        time.sleep(self.sleep_time)
+        # self.sleep_time = random.uniform(1, 2)
+        # # self.sleep for the generated time
+        # time.sleep(self.sleep_time)
+        time.sleep(2)
 
     def run(self):
         print(self.args)
