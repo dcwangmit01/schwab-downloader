@@ -9,7 +9,7 @@ Usage:
   schwab-downloader.py \
     [--all | --checks --docs --transactions] \
     [--year=<YYYY> | --date-range=<YYYYMMDD-YYYYMMDD>]
-    [--id=<id> --password=<password>]
+    [--id=<id> --password=<password>] [--remote-debug]
   schwab-downloader.py (-h | --help)
   schwab-downloader.py (-v | --version)
 
@@ -21,6 +21,9 @@ Date Range Options:
   --date-range=<YYYYMMDD-YYYYMMDD>  Start and end date range
   --year=<YYYY>                     Year, formatted as YYYY  [default: <CUR_YEAR>].
 
+Debug Options:
+  --remote-debug          Enable remote debugging on port 9222
+
 Options:
   -h --help                Show this screen.
   -v --version             Show version.
@@ -28,6 +31,7 @@ Options:
 Examples:
   schwab-downloader.py --year=2022
   schwab-downloader.py --date-range=20220101-20221231
+  schwab-downloader.py --remote-debug --year=2022
 """
 
 import json
@@ -36,13 +40,45 @@ import random
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 
 import ipdb
 from docopt import docopt
+from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 from playwright_stealth import Stealth
 
 from schwab_downloader.__about__ import __version__
+
+
+def load_env_if_needed():
+    """Load environment variables from .env file if it exists and variables aren't set."""
+    # Check if Schwab credentials are already set in environment
+    schwab_id = os.environ.get('SCHWAB_ID')
+    schwab_password = os.environ.get('SCHWAB_PASSWORD')
+
+    # If both are already set, no need to load .env
+    if schwab_id and schwab_password:
+        return
+
+    # Look for .env file in current directory and parent directories
+    current_dir = Path.cwd()
+    env_file = None
+
+    # Check current directory and up to 3 parent directories
+    for i in range(4):
+        check_path = current_dir / '.env'
+        if check_path.exists():
+            env_file = check_path
+            break
+        current_dir = current_dir.parent
+
+    if env_file:
+        print(f"Loading environment variables from {env_file}")
+        load_dotenv(env_file)
+    else:
+        print("No .env file found in current directory or parent directories")
+
 
 TARGET_DIR = os.getcwd() + "/" + "downloads"
 
@@ -85,9 +121,31 @@ class SchwabDownloader:
         os.makedirs(TARGET_DIR, exist_ok=True)
 
     def launch_browser(self):
-        self.browser = self.playwright.chromium.launch(
-            headless=False,
-        )
+        # Check if remote debugging is enabled
+        remote_debug = self.args.get('--remote-debug', False)
+
+        if remote_debug:
+            print("🚀 Launching Chromium with CDP debugging on port 9222")
+            print("📱 You can connect to this browser at: http://localhost:9222")
+            print("🔗 AI assistant can control this browser instance via CDP")
+
+            # Launch browser with CDP endpoint
+            self.browser = self.playwright.chromium.launch(
+                headless=False,
+                args=[
+                    '--remote-debugging-port=9222',
+                    '--remote-debugging-address=0.0.0.0',
+                    '--disable-web-security',
+                    '--disable-features=VizDisplayCompositor',
+                ],
+            )
+
+            # Connect to the browser using CDP
+            self.browser = self.playwright.chromium.connect_over_cdp("http://localhost:9222")
+        else:
+            self.browser = self.playwright.chromium.launch(
+                headless=False,
+            )
 
         self.context = self.browser.new_context()
 
@@ -96,28 +154,39 @@ class SchwabDownloader:
         Stealth().apply_stealth_sync(self.page)
         self.page.goto("https://www.schwab.com/")
 
+        # Store frame locator once for efficiency
+        frame = self.page.frame_locator("iframe[title=\"log in form\"]")
+
         if self.id:
-            self.page.frame_locator("iframe[title=\"log in form\"]").get_by_label("Login ID", exact=True).click()
-            self.page.frame_locator("iframe[title=\"log in form\"]").get_by_label("Login ID", exact=True).fill(self.id)
+            frame.get_by_role("textbox", name="Login ID").fill(self.id)
             self.sleep()
 
         if self.password:
-            self.page.frame_locator("iframe[title=\"log in form\"]").get_by_placeholder("Password").click()
-            self.page.frame_locator("iframe[title=\"log in form\"]").get_by_placeholder("Password").fill(self.password)
+            frame.get_by_role("textbox", name="Password").fill(self.password)
             self.sleep()
 
-        self.page.frame_locator("iframe[title=\"log in form\"]").get_by_label("Remember Login ID").check()
+        frame.get_by_label("Remember Login ID").check()
 
         if self.id and self.password:
-            self.page.frame_locator("iframe[title=\"log in form\"]").get_by_label("Log in").click()
+            frame.get_by_role("button", name="Log in").click()
             self.sleep()
 
-    def navigate_to_history(self):
-        self.page.wait_for_url('*client.schwab.com/*', timeout=0)
+        # Check for Schwab identity confirmation page
+        # Give the page a moment to load and potentially redirect
         self.sleep()
-        self.page.get_by_label("secondary level").get_by_role("link", name="History").click()
-        self.page.get_by_role("tab", name="Transactions").click()
-        self.sleep()
+
+        # Check if we're on the identity confirmation page
+        if "Confirm Your Identity" in self.page.title():
+            print("\n2FA REQUIRED: Enter your security code and click Continue")
+            print("Waiting for verification...")
+
+            # Wait indefinitely for the user to complete the verification
+            # We'll wait for the page to change away from the identity confirmation
+            while "Confirm Your Identity" in self.page.title():
+                self.sleep()  # Check every few seconds
+
+            print("Verification completed! Continuing...")
+            self.sleep()
 
     def navigate_to_statements(self):
         self.page.wait_for_url('*client.schwab.com/*', timeout=0)
@@ -125,7 +194,11 @@ class SchwabDownloader:
         self.sleep()
 
     def load_accounts(self):
-        self.navigate_to_history()
+
+        # Assert we are on the summary page
+        assert (
+            "Account Summary" in self.page.title()
+        ), f"Expected to be on Account Summary page, but got: {self.page.title()}"
 
         accounts = {}
         for i, account_type in enumerate(["brokerage", "other", "bank"]):
@@ -355,7 +428,6 @@ class SchwabDownloader:
         self.launch_browser()
         self.login()
         self.load_accounts()
-        self.navigate_to_history()
         self.process_accounts(self.select_history_account, self.process_history_row, self.click_modal_and_save)
         self.navigate_to_statements()
         self.process_accounts(self.select_statements_account, self.process_statements_row, self.click_and_save)
@@ -363,6 +435,9 @@ class SchwabDownloader:
 
 
 def schwab_downloader():
+    # Load environment variables from .env file if needed
+    load_env_if_needed()
+
     args = docopt(__doc__)
     print(args)
     if args['--version']:

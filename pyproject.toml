@@ -25,6 +25,7 @@ dependencies = [
   "playwright>=1.54.0",
   "playwright-stealth>=2.0.0",
   "ipdb>=0.13.13",
+  "python-dotenv>=1.0.0",
 ]
 
 [project.urls]

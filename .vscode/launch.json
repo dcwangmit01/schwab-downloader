@@ -2,22 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug Schwab Downloader",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "src/schwab_downloader/__main__.py",
-      "console": "integratedTerminal",
-      "justMyCode": false,
-      "args": [
-        "--year=2024"
-      ],
-      "env": {
-        "PYTHONPATH": "${workspaceFolder}/src"
-      },
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "name": "Debug with LLM Debug Mode",
+      "name": "Debug with Remote Debugging",
       "type": "debugpy",
       "request": "launch",
       "program": "src/schwab_downloader/__main__.py",
@@ -25,7 +10,7 @@
       "justMyCode": false,
       "args": [
         "--year=2024",
-        "--llm-debug"
+        "--remote-debug"
       ],
       "env": {
         "PYTHONPATH": "${workspaceFolder}/src"
