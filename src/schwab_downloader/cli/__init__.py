@@ -159,34 +159,31 @@ class SchwabDownloader:
 
         if self.id:
             frame.get_by_role("textbox", name="Login ID").fill(self.id)
-            self.sleep()
 
         if self.password:
             frame.get_by_role("textbox", name="Password").fill(self.password)
-            self.sleep()
 
         frame.get_by_label("Remember Login ID").check()
+
+        self.sleep()
 
         if self.id and self.password:
             frame.get_by_role("button", name="Log in").click()
             self.sleep()
 
-        # Check for Schwab identity confirmation page
-        # Give the page a moment to load and potentially redirect
+            # Check if we're on the identity confirmation page
+            if "Confirm Your Identity" in self.page.title():
+                print("\n2FA REQUIRED: Enter your security code and click Continue")
+        else:
+            print("No credentials provided, waiting for user to enter credentials")
+
+        print("Waiting for verification...")
+
+        # Wait for navigation to the account summary page
+        self.page.wait_for_url('https://client.schwab.com/clientapps/accounts/summary/', timeout=0)
+
+        print("Verification completed! Continuing...")
         self.sleep()
-
-        # Check if we're on the identity confirmation page
-        if "Confirm Your Identity" in self.page.title():
-            print("\n2FA REQUIRED: Enter your security code and click Continue")
-            print("Waiting for verification...")
-
-            # Wait indefinitely for the user to complete the verification
-            # We'll wait for the page to change away from the identity confirmation
-            while "Confirm Your Identity" in self.page.title():
-                self.sleep()  # Check every few seconds
-
-            print("Verification completed! Continuing...")
-            self.sleep()
 
     def navigate_to_statements(self):
         self.page.wait_for_url('*client.schwab.com/*', timeout=0)
@@ -195,36 +192,74 @@ class SchwabDownloader:
 
     def load_accounts(self):
 
-        # Assert we are on the summary page
-        assert (
-            "Account Summary" in self.page.title()
-        ), f"Expected to be on Account Summary page, but got: {self.page.title()}"
+        self.accounts = {}
 
-        accounts = {}
-        for i, account_type in enumerate(["brokerage", "other", "bank"]):
-            accounts_list = self.page.query_selector(f"xpath=//ul[contains(@aria-labelledby, 'header-{i}')]")
-            for a in accounts_list.query_selector_all("a"):
-                span_texts = [span.inner_text() for span in a.query_selector_all("span")]
-                account_nickname = span_texts[0]
+        # Find all "More" buttons for accounts
+        more_buttons = self.page.query_selector_all(
+            "xpath=//button[contains(@aria-label, 'More account details overlay')]"
+        )
 
-                if len(span_texts) == 5:
-                    # Then this is an EAC account
-                    account_number = "Equity Award Center"
-                elif len(span_texts) == 6:
-                    # Then this is either bank or brokerage
-                    account_number = "".join(
-                        [c for c in span_texts[3] if c.isdigit()]
-                    )  # strip out all non-numeric characters
-                else:
-                    print("Website has changed, must update code")
-                    ipdb.set_trace()
+        for more_button in more_buttons:
+            # Click the "More" button to open the dialog
+            more_button.click()
+            self.sleep()
 
-                accounts[account_number] = {
-                    "number": account_number,
-                    "nickname": account_nickname,
-                    "type": account_type,
-                }
-        self.accounts = accounts
+            # Wait for the dialog to appear and extract account information
+            dialog = self.page.query_selector("#accountdetailsoverlay-modal-body")
+
+            # Extract account name from the label-value item with "Name" label
+            #   For EAC this will be the company name
+            #   For other accounts this will be the account name (alias that the user has set)
+            name_item = dialog.query_selector(
+                "xpath=.//sdps-list-label-value-item[.//span[contains(text(), 'Name')]]//div[@slot='value']"
+            )
+            account_name = name_item.inner_text().strip() if name_item else "Unknown"
+
+            # Extract account number from the label-value item with "Account Number" label
+            account_number_item = dialog.query_selector(
+                "xpath=.//sdps-list-label-value-item[.//span[contains(text(), 'Account Number')]]//div[@slot='value']"
+            )
+            account_number_text = account_number_item.inner_text().strip() if account_number_item else "Unknown"
+
+            # Extract account number - handle all formats:
+            # 1. "440044196739 Schwab Bank" -> extract "440044196739"
+            # 2. "6206-8621" -> extract "6206-8621"
+            # 3. "1952-1651 DAFgiving360" -> extract "1952-1651"
+            import re
+
+            account_match = re.search(r'[\d-]+', account_number_text)
+            account_number = account_match.group(0) if account_match else "Unknown"
+
+            # Extract account type from the label-value item with "Type" label
+            type_item = dialog.query_selector(
+                "xpath=.//sdps-list-label-value-item[.//span[contains(text(), 'Type')]]//div[@slot='value']"
+            )
+            account_type_text = type_item.inner_text().strip() if type_item else "Unknown"
+            if 'DAF' in account_type_text:
+                account_type = "DAF"
+
+            # Extract "Companies" from the label-value item with "Companies" label, if present
+            companies_item = dialog.query_selector(
+                "xpath=.//sdps-list-label-value-item[.//span[contains(text(), 'Companies')]]//div[@slot='value']"
+            )
+            companies_text = companies_item.inner_text().strip() if companies_item else None
+            if companies_text:
+                account_type = "EAC " + companies_text
+                account_name = "EAC " + companies_text
+                account_number = "EAC"
+            else:
+                account_type = account_type_text.lower()
+
+            # Store the account information
+            self.accounts[account_number] = {
+                "number": account_number,
+                "nickname": account_name,
+                "type": account_type,
+            }
+
+            # Close the dialog
+            self.page.keyboard.press("Escape")
+
         print(json.dumps(self.accounts, indent=2))
 
     def process_accounts(self, fn_account_selector: callable, fn_process_row: callable, fn_click_save: callable):
@@ -416,7 +451,7 @@ class SchwabDownloader:
     def sleep(self):
         # Add human latency
         # Generate a random self.sleep time between 3 and 5 seconds
-        self.sleep_time = random.uniform(2, 5)
+        self.sleep_time = random.uniform(1, 2)
         # self.sleep for the generated time
         time.sleep(self.sleep_time)
 
