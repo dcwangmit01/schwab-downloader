@@ -40,7 +40,7 @@ from datetime import datetime
 import ipdb
 from docopt import docopt
 from playwright.sync_api import sync_playwright
-from playwright_stealth import stealth_sync
+from playwright_stealth import Stealth
 
 from schwab_downloader.__about__ import __version__
 
@@ -93,7 +93,7 @@ class SchwabDownloader:
 
     def login(self):
         self.page = self.context.new_page()
-        stealth_sync(self.page)
+        Stealth().apply_stealth_sync(self.page)
         self.page.goto("https://www.schwab.com/")
 
         if self.id:
