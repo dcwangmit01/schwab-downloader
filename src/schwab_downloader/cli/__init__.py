@@ -351,7 +351,10 @@ class SchwabDownloader:
     def select_account(self, account):
         # Click account selector and select the target account
         self.page.click('.sdps-account-selector')
-        self.page.query_selector(f"xpath=//span[contains(text(), '{account['name']}')]").click()
+        # Wait for dropdown to open and account options to be available
+        self.page.wait_for_selector(f"xpath=//a[.//span[contains(text(), '{account['name']}')]]", timeout=5000)
+        # Click on the account option in the dropdown (more specific selector to target the link)
+        self.page.query_selector(f"xpath=//a[.//span[contains(text(), '{account['name']}')]]").click()
         self.sleep()
 
     def select_history_account(self, account):
@@ -366,13 +369,17 @@ class SchwabDownloader:
 
     def select_statements_account(self, account):
         self.select_account(account)
-        if account['type'] == 'EAC':
-            self.page.select_option('#date-range-select-id', 'Previous 4 Years')
-        else:
-            self.page.select_option('#date-range-select-id', 'Last 10 Years')
-        select_all_button = self.page.query_selector('xpath=//button[contains(., "Select All")]')
-        if select_all_button:
-            select_all_button.click()
+        self.page.select_option('#date-range-select-id', 'Last 10 Years')
+        # Select all document type buttons (using aria-pressed attribute for precise targeting)
+        buttons = self.page.query_selector_all('xpath=//button[@aria-pressed]')
+        for button in buttons:
+            if button.get_attribute('aria-pressed') != 'true':
+                try:
+                    # Use JavaScript click to avoid pointer event interception issues
+                    self.page.evaluate('button => button.click()', button)
+                    self.sleep(0.5)
+                except Exception:
+                    continue
         search_button = self.page.query_selector('xpath=//button[contains(., "Search")]')
         search_button.click()
         self.sleep()
@@ -395,9 +402,12 @@ class SchwabDownloader:
                 import ipdb
 
                 ipdb.set_trace()
+            if account_type == "EAC":
+                pass
             date = datetime.strptime(tds_strs[0].split(" ")[0], "%m/%d/%Y")
             _type = "".join(tds_strs[1].title().split())
             description = "".join(tds_strs[2].title().split())
+            quantity = "".join(tds_strs[3].title().split())
             total = tds_strs[6].replace("$", "").replace(",", "").replace("-", "")
         elif account_type == "bank":
             date = datetime.strptime(tds_strs[0], "%m/%d/%Y")
@@ -407,7 +417,7 @@ class SchwabDownloader:
 
             withdrawal = tds_strs[4].replace("$", "").replace(",", "").replace("-", "")
             deposit = tds_strs[5].replace("$", "").replace(",", "").replace("-", "")
-            total = "0.00"
+            total = ""
             if withdrawal == "":
                 total = deposit
             elif deposit == "":
@@ -424,13 +434,19 @@ class SchwabDownloader:
             file_name = (
                 f"{TARGET_DIR}/schwab"
                 f"_{account_type}_{account_number}_{account_nickname}_{date_str}"
-                f"_{total}_{_type}_{check_number}.pdf"
+                f"_{_type}_{total}_{check_number}.pdf"
+            )
+        elif total == "":
+            file_name = (
+                f"{TARGET_DIR}/schwab"
+                f"_{account_type}_{account_number}_{account_nickname}_{date_str}"
+                f"_{_type}_{quantity}shares_{description}.pdf"
             )
         else:
             file_name = (
                 f"{TARGET_DIR}/schwab"
                 f"_{account_type}_{account_number}_{account_nickname}_{date_str}"
-                f"_{total}_{_type}_{description}.pdf"
+                f"_{_type}_{total}_{description}.pdf"
             )
 
         details_link = data_row.query_selector("button")

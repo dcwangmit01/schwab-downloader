@@ -9,7 +9,7 @@
       "console": "integratedTerminal",
       "justMyCode": false,
       "args": [
-        "--year=2024",
+        "--date-range=20230101-20251231",
         "--cache-accounts=.schwab_accounts.json",
         "--remote-debug"
       ],
