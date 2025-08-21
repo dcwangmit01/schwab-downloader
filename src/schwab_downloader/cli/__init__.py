@@ -602,8 +602,8 @@ class SchwabDownloader:
         self.load_accounts()
         self.navigate_to_history()
         self.process_accounts(self.select_history_account, self.process_history_row, self.click_modal_and_save)
-        # self.navigate_to_statements()
-        # self.process_accounts(self.select_statements_account, self.process_statements_row, self.click_and_save)
+        self.navigate_to_statements()
+        self.process_accounts(self.select_statements_account, self.process_statements_row, self.click_and_save)
         self.close()
 
 

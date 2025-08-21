@@ -24,7 +24,7 @@ test:  ## Run all tests
 format: check  ## Auto-format and check pep8
 
 .PHONY: deps
-deps: deps-os deps-dev deps-uv  ## Ensure OS Dependencies (Only works for MacOS)
+deps: deps-os deps-dev deps-uv install-local  ## Ensure OS Dependencies (Only works for MacOS)
 
 .PHONY: deps-os
 deps-os:  ## Ensure OS Dependencies (MacOS only)
@@ -95,8 +95,6 @@ run-local:  ## Run the program for this year
 run:  ## Run a few examples
 	uv run schwab-downloader --year 2024
 	uv run schwab-downloader --date-range 20230131-20221201
-	uv run schwab-downloader --email=user@domain.com --password=mypassword
-
 
 .PHONY: build
 build:  ## Build the project
