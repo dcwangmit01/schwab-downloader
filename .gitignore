@@ -43,3 +43,4 @@ uv.lock
 .coverage
 htmlcov/
 .schwab_accounts.json
+*.bak

@@ -101,7 +101,7 @@ class SchwabDownloader:
         self.context = None
         self.page = None
         self.accounts = None
-        self.cache_file = args.get('--cache-accounts', '.schwab_accounts.json')
+        self.cache_file = args.get('--cache-accounts') or '.schwab_accounts.json'
         self.refresh_cache = args.get('--refresh-cache', False)
 
     def parse_credentials(self):
@@ -366,6 +366,7 @@ class SchwabDownloader:
         search_button = self.page.query_selector('xpath=//button[contains(., "Search")]')
         search_button.click()
         self.sleep()
+        self.wait_for_table_load()
 
     def select_statements_account(self, account):
         self.select_account(account)
@@ -383,6 +384,18 @@ class SchwabDownloader:
         search_button = self.page.query_selector('xpath=//button[contains(., "Search")]')
         search_button.click()
         self.sleep()
+        self.wait_for_table_load()
+
+    def wait_for_table_load(self):
+        """Wait for either table results to appear or "no results" message"""
+        try:
+            # Wait for either table rows or any "no results" message
+            self.page.wait_for_selector('tbody > tr, [data-testid*="no-"], .no-', timeout=10000)
+        except Exception:
+            # If timeout, check for any "No * Found" message
+            status_text = self.page.query_selector('xpath=//*[contains(text(), "No ") and contains(text(), " Found")]')
+            if not status_text:
+                raise Exception("Page failed to load table data")
 
     def process_history_row(self, data_row, tds, account) -> (str, str, datetime):
         tds_strs = [td.inner_text().strip() for td in tds]
@@ -399,9 +412,10 @@ class SchwabDownloader:
 
         if account_type in ["brokerage", "IRA", "DAF", "EAC"]:
             if len(tds_strs) != 7:
-                import ipdb
-
-                ipdb.set_trace()
+                print("Data row:", data_row)
+                print("TDs:", tds)
+                print("Account:", account)
+                return None, None, None
             if account_type == "EAC":
                 pass
             date = datetime.strptime(tds_strs[0].split(" ")[0], "%m/%d/%Y")
@@ -490,11 +504,25 @@ class SchwabDownloader:
             if first_page:
                 first_page = False
             else:
-                next_link = self.page.query_selector("xpath=//a[contains(text(), 'Next')]")
+                # Find visible Next links using specific aria-label selector
+                next_links = self.page.query_selector_all("a[aria-label=\"Next\"]")
+                if not next_links:
+                    break
+
+                # Find the first visible Next link
+                next_link = None
+                for link in next_links:
+                    # Check if the link is visible (not hidden)
+                    is_visible = link.evaluate("element => element.offsetParent !== null")
+                    if is_visible:
+                        next_link = link
+                        break
+
                 if not next_link:
                     break
                 next_link.click()
                 self.sleep()
+                self.wait_for_table_load()
 
             data_rows = self.page.query_selector_all("tbody > tr")
             for data_row in data_rows:
@@ -562,7 +590,7 @@ class SchwabDownloader:
         # self.sleep_time = random.uniform(1, 2)
         # # self.sleep for the generated time
         # time.sleep(self.sleep_time)
-        time.sleep(2)
+        time.sleep(3)
 
     def run(self):
         print(self.args)
@@ -574,8 +602,8 @@ class SchwabDownloader:
         self.load_accounts()
         self.navigate_to_history()
         self.process_accounts(self.select_history_account, self.process_history_row, self.click_modal_and_save)
-        self.navigate_to_statements()
-        self.process_accounts(self.select_statements_account, self.process_statements_row, self.click_and_save)
+        # self.navigate_to_statements()
+        # self.process_accounts(self.select_statements_account, self.process_statements_row, self.click_and_save)
         self.close()
 
 
