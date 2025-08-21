@@ -10,6 +10,7 @@ Usage:
     [--all | --checks --docs --transactions] \
     [--year=<YYYY> | --date-range=<YYYYMMDD-YYYYMMDD>]
     [--id=<id> --password=<password>] [--remote-debug]
+    [--cache-accounts=<file>] [--refresh-cache]
   schwab-downloader.py (-h | --help)
   schwab-downloader.py (-v | --version)
 
@@ -20,6 +21,10 @@ Login Options:
 Date Range Options:
   --date-range=<YYYYMMDD-YYYYMMDD>  Start and end date range
   --year=<YYYY>                     Year, formatted as YYYY  [default: <CUR_YEAR>].
+
+Cache Options:
+  --cache-accounts=<file> Cache accounts to specified file [default: .schwab_accounts.json].
+  --refresh-cache         Force refresh of accounts cache from web.
 
 Debug Options:
   --remote-debug          Enable remote debugging on port 9222
@@ -32,6 +37,8 @@ Examples:
   schwab-downloader.py --year=2022
   schwab-downloader.py --date-range=20220101-20221231
   schwab-downloader.py --remote-debug --year=2022
+  schwab-downloader.py --cache-accounts=my_accounts.json --year=2022
+  schwab-downloader.py --refresh-cache --year=2022
 """
 
 import json
@@ -94,6 +101,8 @@ class SchwabDownloader:
         self.context = None
         self.page = None
         self.accounts = None
+        self.cache_file = args.get('--cache-accounts', '.schwab_accounts.json')
+        self.refresh_cache = args.get('--refresh-cache', False)
 
     def parse_credentials(self):
         self.id = self.args.get('--id')
@@ -185,13 +194,80 @@ class SchwabDownloader:
         self.sleep()
 
     def navigate_to_statements(self):
-        self.page.wait_for_url('*client.schwab.com/*', timeout=0)
-        self.page.get_by_label("secondary level").get_by_role("link", name="Statements").click()
+        self.page.get_by_label("secondary level").get_by_role("link", name="Statements & Tax Forms").click()
+        self.page.wait_for_url('https://client.schwab.com/app/accounts/statements/#/', timeout=0)
         self.sleep()
 
-    def load_accounts(self):
+    def navigate_to_history(self):
+        self.page.get_by_label("secondary level").get_by_role("link", name="Transaction History").click()
+        self.page.wait_for_url('https://client.schwab.com/app/accounts/history/#/', timeout=0)
+        self.sleep()
 
+    def load_accounts_from_cache(self):
+        """Load accounts from cache file if it exists and is valid."""
+        if not os.path.exists(self.cache_file):
+            print(f"Cache file {self.cache_file} does not exist")
+            return False
+
+        try:
+            with open(self.cache_file, 'r') as f:
+                cache_data = json.load(f)
+
+            # Validate cache structure - ensure it has account data
+            if not isinstance(cache_data, dict) or not cache_data:
+                print(f"Cache file {self.cache_file} is empty or invalid")
+                return False
+
+            # Basic validation - check if accounts have required fields
+            for account_id, account_data in cache_data.items():
+                if not isinstance(account_data, dict):
+                    print(f"Cache file {self.cache_file} has invalid account data")
+                    return False
+                required_fields = ['number', 'name', 'type']
+                if not all(field in account_data for field in required_fields):
+                    print(f"Cache file {self.cache_file} missing required fields")
+                    return False
+
+            self.accounts = cache_data
+            print(f"Loaded {len(self.accounts)} accounts from cache file {self.cache_file}")
+            print(json.dumps(self.accounts, indent=2))
+            return True
+
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Error loading cache file {self.cache_file}: {e}")
+            return False
+
+    def save_accounts_to_cache(self):
+        """Save accounts to cache file."""
+        if not self.accounts:
+            print("No accounts to cache")
+            return
+
+        try:
+            with open(self.cache_file, 'w') as f:
+                json.dump(self.accounts, f, indent=2)
+            print(f"Saved {len(self.accounts)} accounts to cache file {self.cache_file}")
+        except IOError as e:
+            print(f"Error saving to cache file {self.cache_file}: {e}")
+
+    def load_accounts(self):
+        """Load accounts from cache if available, otherwise scrape from web."""
+        # Check if we should try to load from cache
+        if not self.refresh_cache and self.load_accounts_from_cache():
+            return
+
+        print("Loading accounts from web...")
+        self.load_accounts_from_web()
+        self.save_accounts_to_cache()
+
+    def load_accounts_from_web(self):
+        """Load accounts by scraping from the Schwab website."""
         self.accounts = {}
+
+        # Wait for the "More" buttons to be present before querying
+        self.page.wait_for_selector(
+            "xpath=//button[contains(@aria-label, 'More account details overlay')]", timeout=30000
+        )
 
         # Find all "More" buttons for accounts
         more_buttons = self.page.query_selector_all(
@@ -242,17 +318,19 @@ class SchwabDownloader:
             companies_text = companies_item.inner_text().strip() if companies_item else None
             if companies_text:
                 account_type = "EAC"
-                account_name = "EAC " + companies_text
-                account_number = "EAC" + companies_text
+                account_name = "Equity Award Center"
+                account_number = "EAC " + companies_text
             elif 'DAF' in account_type_text:
                 account_type = "DAF"
+            elif account_type_text == "Checking":
+                account_type = "bank"
             else:
                 account_type = account_type_text
 
             # Store the account information
             self.accounts[account_number] = {
                 "number": account_number,
-                "nickname": account_name,
+                "name": account_name,
                 "type": account_type,
             }
 
@@ -269,22 +347,27 @@ class SchwabDownloader:
             self.process_page(account, fn_process_row, fn_click_save)
 
     def select_account(self, account):
-        if account['number'] not in self.page.query_selector("button.account-selector-button").inner_text():
-            self.page.click('.sdps-account-selector')
-            self.page.query_selector(f"xpath=//span[contains(text(), '{account['number']}')]").click()
-            self.sleep()
+        # Click account selector and select the target account
+        self.page.click('.sdps-account-selector')
+        self.page.query_selector(f"xpath=//span[contains(text(), '{account['name']}')]").click()
+        self.sleep()
 
     def select_history_account(self, account):
         self.select_account(account)
-        self.page.select_option('#date-range-select-id', 'All')
+        if account['type'] == 'EAC':
+            self.page.select_option('#date-range-select-id', 'Previous 4 Years')
+        else:
+            self.page.select_option('#date-range-select-id', 'All')
         search_button = self.page.query_selector('xpath=//button[contains(., "Search")]')
         search_button.click()
         self.sleep()
 
     def select_statements_account(self, account):
         self.select_account(account)
-        self.page.query_selector("#date-range-select-id").click()
-        self.page.select_option('#date-range-select-id', 'Last 10 Years')
+        if account['type'] == 'EAC':
+            self.page.select_option('#date-range-select-id', 'Previous 4 Years')
+        else:
+            self.page.select_option('#date-range-select-id', 'Last 10 Years')
         select_all_button = self.page.query_selector('xpath=//button[contains(., "Select All")]')
         if select_all_button:
             select_all_button.click()
@@ -298,10 +381,10 @@ class SchwabDownloader:
         tds_strs = [td.replace("\n", "") for td in tds_strs]  # remove all newlines from tds_strs
 
         account_type = account["type"]
-        account_nickname = account["nickname"].title().replace(" ", "").replace("/", "")
+        account_nickname = account["name"].title().replace(" ", "").replace("/", "")
         account_number = account["number"][-4:]
 
-        if account_type == "other":  # EAC Row
+        if account_type == "EAC":  # EAC Row
             # EAC doesn't have details to save.  Set date to be super old and details_link = None
             return None, None, datetime(2000, 1, 1)
         elif account_type == "brokerage":
@@ -327,6 +410,8 @@ class SchwabDownloader:
             elif deposit == "":
                 total = withdrawal
 
+        if date is None:
+            pass
         date_str = date.strftime("%Y%m%d")
 
         if _type == "Check":
@@ -355,9 +440,9 @@ class SchwabDownloader:
             return None, None, datetime(2000, 1, 1)
 
         account_type = account["type"]
-        account_nickname = account["nickname"].title().replace(" ", "").replace("/", "")
-        if account_type == "other":
-            account_number = "EAC"
+        account_nickname = account["name"].title().replace(" ", "").replace("/", "")
+        if account_type != "EAC":
+            account_number = account["number"]
         else:
             account_number = account["number"][-4:]
 
@@ -463,6 +548,7 @@ class SchwabDownloader:
         self.launch_browser()
         self.login()
         self.load_accounts()
+        self.navigate_to_history()
         self.process_accounts(self.select_history_account, self.process_history_row, self.click_modal_and_save)
         self.navigate_to_statements()
         self.process_accounts(self.select_statements_account, self.process_statements_row, self.click_and_save)

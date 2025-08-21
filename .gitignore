@@ -42,3 +42,4 @@ uv.lock
 .pytest_cache/
 .coverage
 htmlcov/
+.schwab_accounts.json
