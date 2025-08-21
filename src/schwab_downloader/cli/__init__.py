@@ -319,11 +319,13 @@ class SchwabDownloader:
             if companies_text:
                 account_type = "EAC"
                 account_name = "Equity Award Center"
-                account_number = "EAC " + companies_text
+                account_number = "EAC" + companies_text.replace(" ", "")
             elif 'DAF' in account_type_text:
                 account_type = "DAF"
             elif account_type_text == "Checking":
                 account_type = "bank"
+            elif account_type_text == "Brokerage":
+                account_type = "brokerage"
             else:
                 account_type = account_type_text
 
@@ -382,25 +384,26 @@ class SchwabDownloader:
 
         account_type = account["type"]
         account_nickname = account["name"].title().replace(" ", "").replace("/", "")
-        account_number = account["number"][-4:]
+        if account_type == "EAC":
+            account_number = account["number"]
+        else:
+            account_number = account["number"][-4:]
+        date = None
 
-        if account_type == "EAC":  # EAC Row
-            # EAC doesn't have details to save.  Set date to be super old and details_link = None
-            return None, None, datetime(2000, 1, 1)
-        elif account_type == "brokerage":
+        if account_type in ["brokerage", "IRA", "DAF", "EAC"]:
             if len(tds_strs) != 7:
                 import ipdb
 
                 ipdb.set_trace()
             date = datetime.strptime(tds_strs[0].split(" ")[0], "%m/%d/%Y")
-            _type = tds_strs[1].title().replace(" ", "")
-            description = tds_strs[2].title().replace(" ", "")
+            _type = "".join(tds_strs[1].title().split())
+            description = "".join(tds_strs[2].title().split())
             total = tds_strs[6].replace("$", "").replace(",", "").replace("-", "")
         elif account_type == "bank":
             date = datetime.strptime(tds_strs[0], "%m/%d/%Y")
-            _type = tds_strs[1].title().replace(" ", "")
+            _type = "".join(tds_strs[1].title().split())
             check_number = tds_strs[2]
-            description = tds_strs[3].title().replace(" ", "")
+            description = "".join(tds_strs[3].title().split())
 
             withdrawal = tds_strs[4].replace("$", "").replace(",", "").replace("-", "")
             deposit = tds_strs[5].replace("$", "").replace(",", "").replace("-", "")
@@ -411,7 +414,10 @@ class SchwabDownloader:
                 total = withdrawal
 
         if date is None:
-            pass
+            import ipdb
+
+            ipdb.set_trace()
+
         date_str = date.strftime("%Y%m%d")
 
         if _type == "Check":
@@ -441,15 +447,15 @@ class SchwabDownloader:
 
         account_type = account["type"]
         account_nickname = account["name"].title().replace(" ", "").replace("/", "")
-        if account_type != "EAC":
+        if account_type == "EAC":
             account_number = account["number"]
         else:
             account_number = account["number"][-4:]
 
         date = datetime.strptime(tds_strs[0].split(" ")[0], "%m/%d/%Y")
-        _type = tds_strs[1].title().replace(" ", "")
-        doc_name = (
-            tds_strs[3].title().replace(" ", "").split("\n")[0].replace("/", "")
+        _type = "".join(tds_strs[1].title().split())
+        doc_name = "".join(tds_strs[3].title().split("\n")[0].split()).replace(
+            "/", ""
         )  # Split off regulatory inserts, then replace slashes
 
         date_str = date.strftime("%Y%m%d")
@@ -507,7 +513,9 @@ class SchwabDownloader:
             details_link.click()
             time.sleep(5)
 
-            print_link = self.page.query_selector("a.print-link")  # Wire Details
+            print_link = self.page.query_selector("button#print-icon-button")  # Trade Details
+            if not print_link:
+                print_link = self.page.query_selector("a.print-link")  # Wire Details
             if not print_link:
                 print_link = self.page.query_selector("a.linkPrint")  # Check Details
             if not print_link:
