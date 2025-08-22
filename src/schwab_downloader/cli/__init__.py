@@ -194,8 +194,15 @@ class SchwabDownloader:
         self.sleep()
 
     def navigate_to_statements(self):
-        self.page.get_by_label("secondary level").get_by_role("link", name="Statements & Tax Forms").click()
-        self.page.wait_for_url('https://client.schwab.com/app/accounts/statements/#/', timeout=0)
+        # Click on any link with "Statements" in it
+        statements_link = self.page.query_selector('nav[aria-label="secondary level"] a[href*="Statements"]')
+        if statements_link:
+            statements_link.click()
+            self.page.wait_for_url('https://client.schwab.com/app/Accounts/Statements/#/', timeout=0)
+        else:
+            # Fallback to the original method if "Statements" link not found
+            self.page.get_by_label("secondary level").get_by_role("link", name="Statements & Tax Forms").click()
+            self.page.wait_for_url('https://client.schwab.com/app/accounts/statements/#/', timeout=0)
         self.sleep()
 
     def navigate_to_history(self):
@@ -390,10 +397,12 @@ class SchwabDownloader:
         """Wait for either table results to appear or "no results" message"""
         try:
             # Wait for either table rows or any "no results" message
-            self.page.wait_for_selector('tbody > tr, [data-testid*="no-"], .no-', timeout=10000)
+            self.page.wait_for_selector('tbody > tr, [data-testid*="no-"], .no-', timeout=5000)
         except Exception:
             # If timeout, check for any "No * Found" message
-            status_text = self.page.query_selector('xpath=//*[contains(text(), "No ") and contains(text(), " Found")]')
+            status_text = self.page.query_selector(
+                'xpath=//*[contains(text(), "No ") and contains(translate(text(), "FOUND", "found"), "found")]'
+            )
             if not status_text:
                 raise Exception("Page failed to load table data")
 
