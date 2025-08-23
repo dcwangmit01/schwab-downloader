@@ -429,14 +429,14 @@ class SchwabDownloader:
                 pass
             date = datetime.strptime(tds_strs[0].split(" ")[0], "%m/%d/%Y")
             _type = "".join(tds_strs[1].title().split())
-            description = "".join(tds_strs[2].title().split())
+            description = "".join(tds_strs[2].title().split()).replace("/", "")
             quantity = "".join(tds_strs[3].title().split())
             total = tds_strs[6].replace("$", "").replace(",", "").replace("-", "")
         elif account_type == "bank":
             date = datetime.strptime(tds_strs[0], "%m/%d/%Y")
             _type = "".join(tds_strs[1].title().split())
             check_number = tds_strs[2]
-            description = "".join(tds_strs[3].title().split())
+            description = "".join(tds_strs[3].title().split()).replace("/", "")
 
             withdrawal = tds_strs[4].replace("$", "").replace(",", "").replace("-", "")
             deposit = tds_strs[5].replace("$", "").replace(",", "").replace("-", "")
